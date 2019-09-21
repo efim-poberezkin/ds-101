@@ -48,9 +48,9 @@ from statistics import mean
 import numpy as np
 import pandas as pd
 import pandas_profiling
-from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import LinearRegression, Ridge
 from sklearn.metrics import mean_squared_error, r2_score
-from sklearn.model_selection import KFold, train_test_split
+from sklearn.model_selection import GridSearchCV, KFold, train_test_split
 
 # %% [markdown]
 # ## EDA
@@ -139,8 +139,9 @@ def print_metrics_and_weights(mse, r2, weights):
 
 
 # %%
+cv = KFold(n_splits=5, random_state=37)
+
 def evaluate_on_cv(reg, X, y):
-    cv = KFold(n_splits=5, random_state=37)
     mse_scores, r2_scores = [], []
     k = 0
 
@@ -223,4 +224,43 @@ X_train_enriched.sample(3)
 evaluate_on_cv(linear_reg, X_train_enriched, y_train)
 
 # %% [markdown]
-# Large coefficients signal us that the model has overfit to enriched data. Let's try to combat it with regularization.
+# Even though MSE and $R^{2}$ metrics have slightly improved, large coefficients signal us that the model has overfit to enriched data. Let's try to combat it with regularization.
+
+# %% [markdown]
+# ## Regularization. Hyperparameter tuning
+
+# %% [markdown]
+# We'll perform ridge regularization on GridSearchCV with several regularization parameters. 
+
+# %%
+alphas = np.array([1, 0.3, 0.1, 0.03, 0.01, 0.003, 0.001, 0.0003, 0.0001])
+ridge = Ridge()
+grid = GridSearchCV(
+    estimator=ridge,
+    param_grid=dict(alpha=alphas),
+    scoring=["neg_mean_squared_error", "r2"],
+    cv=cv,
+    refit="r2"
+)
+_ = grid.fit(X_train_enriched, y_train)
+
+# %%
+mse_means = grid.cv_results_["mean_test_neg_mean_squared_error"]
+r2_means = grid.cv_results_["mean_test_r2"]
+
+for mse_mean, r2_mean, params in zip(mse_means, r2_means, grid.cv_results_["params"]):
+    print(f"MSE: {-mse_mean}; R2: {r2_mean} for {params}")
+
+# %%
+print(f"Best R2: {grid.best_score_}")
+print(f"Best alpha: {grid.best_estimator_.alpha}")
+
+# %% [markdown]
+# Let's check performance of the model with best regularization parameter on the test set.
+
+# %%
+ridge = Ridge(alpha=grid.best_estimator_.alpha)
+evaluate_on_test(ridge, X_train_enriched, X_test_enriched, y_train, y_test)
+
+# %% [markdown]
+# With regularization metrics are still improved but model doesn't seem to be overfit anymore.

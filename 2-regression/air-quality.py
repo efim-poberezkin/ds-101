@@ -186,5 +186,41 @@ evaluate_on_cv(linear_reg, X_train_baseline, y_train)
 # %%
 evaluate_on_test(linear_reg, X_train_baseline, X_test_baseline, y_train, y_test)
 
+
 # %% [markdown]
 # We can see that even the baseline linear regression model fits our data quite well and according to $R^{2}$ scores we got it explains over 97% of variance in C6H6(GT).
+
+# %% [markdown]
+# ## Feature engineering
+
+# %% [markdown]
+# We'll enrich our data with Season feature based on Date and one hot encode it as well as Time for regression. 
+
+# %%
+def enrich(df):
+    df_enriched = df
+    df_enriched["Season"] = df["Date"].apply(lambda dt: (dt.month % 12 + 3) // 3)
+    df_enriched = pd.concat(
+        [df_enriched, pd.get_dummies(df_enriched["Season"], prefix="Season")], axis=1
+    )
+    df_enriched = pd.concat(
+        [df_enriched, pd.get_dummies(df_enriched["Time"], prefix="Time")], axis=1
+    )
+    df_enriched.drop(columns=["Date", "Season", "Time"], inplace=True)
+    return df_enriched
+
+
+# %%
+X_train_enriched = enrich(X_train)
+X_test_enriched = enrich(X_test)
+
+X_train_enriched.sample(3)
+
+# %% [markdown]
+# Let's see how our baseline linear regression model will train on enriched data.
+
+# %%
+evaluate_on_cv(linear_reg, X_train_enriched, y_train)
+
+# %% [markdown]
+# Large coefficients signal us that the model has overfit to enriched data. Let's try to combat it with regularization.

@@ -51,6 +51,7 @@ import pandas_profiling
 from sklearn.linear_model import LinearRegression, Ridge
 from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.model_selection import GridSearchCV, KFold, train_test_split
+from sklearn.svm import SVR
 
 # %% [markdown]
 # ## EDA
@@ -141,11 +142,11 @@ def print_metrics_and_weights(mse, r2, weights):
 # %%
 cv = KFold(n_splits=5, random_state=37)
 
-def evaluate_on_cv(reg, X, y):
+def evaluate_on_cv(reg, X, y, kfold):
     mse_scores, r2_scores = [], []
     k = 0
 
-    for train, test in cv.split(X, y):
+    for train, test in kfold.split(X, y):
         k += 1
         print(f"\n--- Fold {k} ---")
         mse, r2, weights = evaluate(
@@ -182,7 +183,7 @@ X_train_baseline = X_train.drop(columns=["Date", "Time"])
 X_test_baseline = X_test.drop(columns=["Date", "Time"])
 
 linear_reg = LinearRegression()
-evaluate_on_cv(linear_reg, X_train_baseline, y_train)
+evaluate_on_cv(linear_reg, X_train_baseline, y_train, cv)
 
 # %%
 evaluate_on_test(linear_reg, X_train_baseline, X_test_baseline, y_train, y_test)
@@ -221,7 +222,7 @@ X_train_enriched.sample(3)
 # Let's see how our baseline linear regression model will train on enriched data.
 
 # %%
-evaluate_on_cv(linear_reg, X_train_enriched, y_train)
+evaluate_on_cv(linear_reg, X_train_enriched, y_train, cv)
 
 # %% [markdown]
 # Even though MSE and $R^{2}$ metrics have slightly improved, large coefficients signal us that the model has overfit to enriched data. Let's try to combat it with regularization.
@@ -264,3 +265,54 @@ evaluate_on_test(ridge, X_train_enriched, X_test_enriched, y_train, y_test)
 
 # %% [markdown]
 # With regularization metrics are still improved but model doesn't seem to be overfit anymore.
+
+# %% [markdown]
+# ## Non-classic regression
+
+# %% [markdown]
+# We'll compare performance of linear regression with regularization to SVM regression. Again we'll tune hyperparameters on grid search and evaluate the best model on the test set.
+
+# %%
+c = np.array([1e0, 1e1, 1e2, 1e3])
+kernels = np.array(["rbf", "sigmoid"])
+svr = SVR(gamma="scale")
+grid = GridSearchCV(
+    estimator=svr,
+    param_grid=dict(kernel=kernels, C=c),
+    scoring=["neg_mean_squared_error", "r2"],
+    cv=cv,
+    refit="r2"
+)
+_ = grid.fit(X_train_enriched, y_train)
+
+# %%
+mse_means = grid.cv_results_["mean_test_neg_mean_squared_error"]
+r2_means = grid.cv_results_["mean_test_r2"]
+
+for mse_mean, r2_mean, params in zip(mse_means, r2_means, grid.cv_results_["params"]):
+    print(f"MSE: {-mse_mean}; R2: {r2_mean} for {params}")
+
+# %% [markdown]
+# Sigmoid kernel seemingly is not able to fit our data well at all.
+
+# %%
+print(f"Best R2: {grid.best_score_}")
+print(f"Best kernel: {grid.best_estimator_.kernel}")
+print(f"Best C: {grid.best_estimator_.C}")
+
+# %% [markdown]
+# Let's check performance of SVR with best hyparameters on the test set.
+
+# %%
+svr = SVR(gamma="scale", kernel=grid.best_estimator_.kernel, C=grid.best_estimator_.C)
+
+svr.fit(X_train_enriched, y_train)
+y_pred = svr.predict(X_test_enriched)
+mse = mean_squared_error(y_test, y_pred)
+r2 = r2_score(y_test, y_pred)
+
+print(f"MSE: {mse:.4f}")
+print(f"R2: {r2:.4f}")
+
+# %% [markdown]
+# We can see that by using SVM with non-linear rbf kernel we achieve even higher performance on selected metrics. 
